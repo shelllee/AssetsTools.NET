@@ -198,18 +198,18 @@ namespace AssetsTools.NET
             //actually write the file data to the bundle now
             for (int i = 0; i < dirInfos.Count; i++)
             {
+                dirInfos[i].offset = writer.Position - assetDataPos;
+
+                var segmentWritter = new AssetsFileWriter(new SegmentStream(writer.BaseStream, writer.BaseStream.Position));
+
                 AssetBundleDirectoryInfo06 info = dirInfos[i];
                 BundleReplacer replacer = replacers.FirstOrDefault(n => n.GetEntryName() == info.name);
                 if (replacer != null)
                 {
                     if (replacer.GetReplacementType() == BundleReplacementType.AddOrModify)
                     {
-                        long startPos = writer.Position;
-                        long endPos = replacer.Write(writer);
-                        long size = endPos - startPos;
+                        replacer.Write(segmentWritter);
 
-                        dirInfos[i].decompressedSize = size;
-                        dirInfos[i].offset = startPos - assetDataPos;
                     }
                     else if (replacer.GetReplacementType() == BundleReplacementType.Remove)
                     {
@@ -220,14 +220,14 @@ namespace AssetsTools.NET
                 {
                     if (newToOriginalDirInfoLookup.TryGetValue(info, out AssetBundleDirectoryInfo06 originalInfo))
                     {
-                        long startPos = writer.Position;
-
                         reader.Position = bundleHeader6.GetFileDataOffset() + originalInfo.offset;
-                        reader.BaseStream.CopyToCompat(writer.BaseStream, originalInfo.decompressedSize);
+                        reader.BaseStream.CopyToCompat(segmentWritter.BaseStream, originalInfo.decompressedSize);
 
-                        dirInfos[i].offset = startPos - assetDataPos;
                     }
                 }
+
+                segmentWritter.Align16();
+                dirInfos[i].decompressedSize = segmentWritter.Position;
             }
 
             //now that we know what the sizes are of the written files let's go back and fix them

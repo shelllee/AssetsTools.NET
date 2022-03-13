@@ -6,6 +6,7 @@ namespace AssetsTools.NET.Extra
     internal class SegmentStream : Stream
     {
         private readonly long length;
+        private long position;
 
         public SegmentStream(Stream baseStream, long baseOffset)
             : this(baseStream, baseOffset, -1)
@@ -37,8 +38,15 @@ namespace AssetsTools.NET.Extra
 
         public override long Position
         {
-            get;
-            set;
+            get
+            {
+                return position;
+            }
+            set
+            {
+                position = value;
+                BaseStream.Position = position + BaseOffset;
+            }
         }
 
         public override long Length
@@ -53,7 +61,6 @@ namespace AssetsTools.NET.Extra
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            BaseStream.Position = BaseOffset + Position;
             count = BaseStream.Read(buffer, offset, (int)Math.Min(count, Length - Position));
             Position += count;
             return count;
@@ -73,13 +80,14 @@ namespace AssetsTools.NET.Extra
                     break;
 
                 case SeekOrigin.End:
-                    newPosition = Position + Length + offset;
+                    newPosition = Length + offset;
                     break;
 
                 default:
                     throw new ArgumentException();
             }
 
+            // seek end???
             if (newPosition < 0 || newPosition > Length)
                 throw new ArgumentOutOfRangeException(nameof(offset));
 
@@ -94,10 +102,10 @@ namespace AssetsTools.NET.Extra
 
         public override void Write(byte[] buffer, int offset, int count)
         {
+            // seek end???
             if (length >= 0 && count > Length - Position)
                 throw new ArgumentOutOfRangeException(nameof(count));
 
-            BaseStream.Position = BaseOffset + Position;
             BaseStream.Write(buffer, offset, count);
             Position += count;
         }

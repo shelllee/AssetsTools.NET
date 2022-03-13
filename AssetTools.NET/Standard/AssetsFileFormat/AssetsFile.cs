@@ -1,4 +1,6 @@
 ﻿using AssetsTools.NET.Extra;
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -116,31 +118,38 @@ namespace AssetsTools.NET
             }
             typeTree.Write(writer, header.format);
 
-            Dictionary<long, AssetFileInfo> oldAssetInfosByPathId = new Dictionary<long, AssetFileInfo>();
-            Dictionary<long, AssetsReplacer> replacersByPathId = replacers.ToDictionary(r => r.GetPathID());
-            List<AssetFileInfo> newAssetInfos = new List<AssetFileInfo>();
-
             // Collect unchanged assets (that aren't getting removed)
             reader.Position = assetTablePos;
+
+            Dictionary<long, AssetFileInfo> oldAssetInfosByPathId = new Dictionary<long, AssetFileInfo>((int)assetCount);
+            Dictionary<long, AssetsReplacer> replacersByPathId = replacers.ToDictionary(r => r.GetPathID());
+            List<AssetFileInfo> newAssetInfos = new List<AssetFileInfo>((int)assetCount/* + replacers.Count*/);
+            List<long> oldAssetInfoIndexes = new List<long>((int)assetCount);
+
             for (int i = 0; i < assetCount; i++)
             {
                 AssetFileInfo oldAssetInfo = new AssetFileInfo();
                 oldAssetInfo.Read(header.format, reader);
                 oldAssetInfosByPathId.Add(oldAssetInfo.index, oldAssetInfo);
+                oldAssetInfoIndexes.Add(oldAssetInfo.index);
 
                 if (replacersByPathId.ContainsKey(oldAssetInfo.index))
                     continue;
 
                 AssetFileInfo newAssetInfo = new AssetFileInfo
-                                             {
-                                                 index = oldAssetInfo.index,
-                                                 curFileTypeOrIndex = oldAssetInfo.curFileTypeOrIndex,
-                                                 inheritedUnityClass = oldAssetInfo.inheritedUnityClass,
-                                                 scriptIndex = oldAssetInfo.scriptIndex,
-                                                 unknown1 = oldAssetInfo.unknown1
-                                             };
+                {
+                    index = oldAssetInfo.index,
+                    curFileOffset = oldAssetInfo.curFileOffset,
+                    curFileSize = oldAssetInfo.curFileSize,
+                    curFileTypeOrIndex = oldAssetInfo.curFileTypeOrIndex,
+                    inheritedUnityClass = oldAssetInfo.inheritedUnityClass,
+                    scriptIndex = oldAssetInfo.scriptIndex,
+                    unknown1 = oldAssetInfo.unknown1
+                };
+
                 newAssetInfos.Add(newAssetInfo);
             }
+
 
             // Collect modified and new assets
             foreach (AssetsReplacer replacer in replacers.Where(r => r.GetReplacementType() == AssetsReplacementType.AddOrModify))
@@ -168,9 +177,9 @@ namespace AssetsTools.NET
                 newAssetInfos.Add(newAssetInfo);
             }
 
-            newAssetInfos.Sort((i1, i2) => i1.index.CompareTo(i2.index));
+            newAssetInfos.Sort((i1, i2) => i1.curFileOffset.CompareTo(i2.curFileOffset));
 
-            // Write asset infos (will write again later on to update the offsets and sizes)
+            //Write asset infos(will write again later on to update the offsets and sizes)
             writer.Write(newAssetInfos.Count);
             writer.Align();
             long newAssetTablePos = writer.Position;
@@ -213,6 +222,7 @@ namespace AssetsTools.NET
 
             long newFirstFileOffset = writer.Position;
 
+
             // Write all asset data
             for (int i = 0; i < newAssetInfos.Count; i++)
             {
@@ -232,7 +242,9 @@ namespace AssetsTools.NET
 
                 newAssetInfo.curFileSize = (uint)(writer.Position - (newFirstFileOffset + newAssetInfo.curFileOffset));
                 if (i != newAssetInfos.Count - 1)
+                {
                     writer.Align8();
+                }
             }
 
             long newFileSize = writer.Position - filePos;
@@ -253,8 +265,28 @@ namespace AssetsTools.NET
             writer.Position = filePos;
             newHeader.Write(writer);
 
+
+            Dictionary<long, AssetFileInfo> newAssetInfosByPathId = new Dictionary<long, AssetFileInfo>(newAssetInfos.Count);
+            newAssetInfos.ForEach(ai => newAssetInfosByPathId.Add(ai.index, ai));
+
             // Write new asset infos again (this time with offsets and sizes filled in)
             writer.Position = newAssetTablePos;
+            // old asset in old order
+            foreach (var oldIndex in oldAssetInfoIndexes)
+            {
+                if(!newAssetInfosByPathId.TryGetValue(oldIndex, out AssetFileInfo assetInfo))
+                {
+                    continue;
+                }
+
+                assetInfo.Write(header.format, writer);
+
+                newAssetInfosByPathId.Remove(oldIndex);
+                newAssetInfos.Remove(assetInfo);
+            }
+
+            // new asset in offset order
+            newAssetInfos.Sort((i1, i2) => i1.curFileOffset.CompareTo(i2.curFileOffset));
             foreach (AssetFileInfo newAssetInfo in newAssetInfos)
             {
                 newAssetInfo.Write(header.format, writer);
